@@ -1,26 +1,36 @@
-from src.fast.utils import get_indices, im2col, col2im
+from src.fast.utils import get_indices, im2col, col2im, mask_filter
 import numpy as np
 
 class Conv():
-    
-    def __init__(self, nb_filters, filter_size, nb_channels, stride=1, padding=0):
-        self.n_F = nb_filters
+
+    def __init__(self, nb_filters, filter_size, nb_channels, stride=1, padding=0, pruned_index=[]):
+        self.n_F = nb_filters - len(pruned_index)
         self.f = filter_size
         self.n_C = nb_channels
         self.s = stride
         self.p = padding
-
+        self.pruned = pruned_index
+        self.kept = [x for x in range(0,nb_filters) if x not in pruned_index]
         # Xavier-Glorot initialization - used for sigmoid, tanh.
-        self.W = {'val': np.random.randn(self.n_F, self.n_C, self.f, self.f) * np.sqrt(1. / (self.f)),
-                  'grad': np.zeros((self.n_F, self.n_C, self.f, self.f))}  
-        self.b = {'val': np.random.randn(self.n_F) * np.sqrt(1. / self.n_F), 'grad': np.zeros((self.n_F))}
+        self.W = {'val': np.random.randn(nb_filters, self.n_C, self.f, self.f) * np.sqrt(1. / (self.f)),
+                  'grad': np.zeros((nb_filters, self.n_C, self.f, self.f))}
+        self.b = {'val': np.random.randn(nb_filters) * np.sqrt(1. / self.n_F), 'grad': np.zeros((nb_filters))}
 
+        #self.W['val'] = self.mask_filter(self.W['val'])
+        #self.W['grad'] = self.mask_filter(self.W['grad'])
+        #self.b['val'] = self.mask_filter(self.b['val'])
+        #self.b['grad'] = self.mask_filter(self.b['grad'])
+
+        self.W['val'] = mask_filter(self.W['val'], kept_index=self.kept)
+        self.W['grad'] = mask_filter(self.W['grad'], kept_index=self.kept)
+        self.b['val'] = mask_filter(self.b['val'], kept_index=self.kept)
+        self.b['grad'] = mask_filter(self.b['grad'], kept_index=self.kept)
         self.cache = None
 
     def forward(self, X):
         """
             Performs a forward convolution.
-           
+
             Parameters:
             - X : Last conv layer of shape (m, n_C_prev, n_H_prev, n_W_prev).
             Returns:
@@ -31,7 +41,7 @@ class Conv():
         n_C = self.n_F
         n_H = int((n_H_prev + 2 * self.p - self.f)/ self.s) + 1
         n_W = int((n_W_prev + 2 * self.p - self.f)/ self.s) + 1
-        
+
         X_col = im2col(X, self.f, self.f, self.s, self.p)
         w_col = self.W['val'].reshape((self.n_F, -1))
         b_col = self.b['val'].reshape(-1, 1)
@@ -49,7 +59,7 @@ class Conv():
 
             Parameters:
             - dout: error from previous layer.
-            
+
             Returns:
             - dX: error of the current convolutional layer.
             - self.W['grad']: weights gradient.
@@ -71,11 +81,11 @@ class Conv():
         dX = col2im(dX_col, X.shape, self.f, self.f, self.s, self.p)
         # Reshape dw_col into dw.
         self.W['grad'] = dw_col.reshape((dw_col.shape[0], self.n_C, self.f, self.f))
-                
+
         return dX, self.W['grad'], self.b['grad']
 
 class AvgPool():
-    
+
     def __init__(self, filter_size, stride=1, padding=0):
         self.f = filter_size
         self.s = stride
@@ -88,9 +98,9 @@ class AvgPool():
 
             Parameters:
             - X: Output of activation function.
-            
+
             Returns:
-            - A_pool: X after average pooling layer. 
+            - A_pool: X after average pooling layer.
         """
         self.cache = X
 
@@ -98,7 +108,7 @@ class AvgPool():
         n_C = n_C_prev
         n_H = int((n_H_prev + 2 * self.p - self.f)/ self.s) + 1
         n_W = int((n_W_prev + 2 * self.p - self.f)/ self.s) + 1
-        
+
         X_col = im2col(X, self.f, self.f, self.s, self.p)
         X_col = X_col.reshape(n_C, X_col.shape[0]//n_C, -1)
         A_pool = np.mean(X_col, axis=1)
@@ -114,7 +124,7 @@ class AvgPool():
 
             Parameters:
             - dout: Previous layer with the error.
-            
+
             Returns:
             - dX: Conv layer updated with error.
         """
@@ -143,7 +153,7 @@ class Fc():
         # Xavier-Glorot initialization - used for sigmoid, tanh.
         self.W = {'val': np.random.randn(self.row, self.col) * np.sqrt(1./self.col), 'grad': 0}
         self.b = {'val': np.random.randn(1, self.row) * np.sqrt(1./self.row), 'grad': 0}
-        
+
         self.cache = None
 
     def forward(self, fc):
@@ -152,7 +162,7 @@ class Fc():
 
             Parameters:
             - fc: fully connected layer.
-            
+
             Returns:
             - A_fc: new fully connected layer.
         """
@@ -166,11 +176,11 @@ class Fc():
 
             Parameters:
             - deltaL: error at last layer.
-            
+
             Returns:
             - new_deltaL: error at current layer.
             - self.W['grad']: weights gradient.
-            - self.b['grad']: bias gradient.    
+            - self.b['grad']: bias gradient.
         """
         fc = self.cache
         m = fc.shape[0]
@@ -180,11 +190,11 @@ class Fc():
         self.b['grad'] = (1/m) * np.sum(deltaL, axis = 0)
 
         #Compute error.
-        new_deltaL = np.dot(deltaL, self.W['val']) 
+        new_deltaL = np.dot(deltaL, self.W['val'])
         #We still need to multiply new_deltaL by the derivative of the activation
         #function which is done in TanH.backward().
         return new_deltaL, self.W['grad'], self.b['grad']
-    
+
 class SGD():
 
     def __init__(self, lr, params):
@@ -194,7 +204,7 @@ class SGD():
     def update_params(self, grads):
         for key in self.params:
             self.params[key] = self.params[key] - self.lr * grads['d' + key]
-        return self.params        
+        return self.params
 
 class AdamGD():
 
@@ -204,7 +214,7 @@ class AdamGD():
         self.beta2 = beta2
         self.epsilon = epsilon
         self.params = params
-        
+
         self.momentum = {}
         self.rmsprop = {}
 
@@ -213,19 +223,19 @@ class AdamGD():
             self.rmsprop['sd' + key] = np.zeros(self.params[key].shape)
 
     def update_params(self, grads):
-        
+
         for key in self.params:
             # Momentum update.
-            self.momentum['vd' + key] = (self.beta1 * self.momentum['vd' + key]) + (1 - self.beta1) * grads['d' + key] 
+            self.momentum['vd' + key] = (self.beta1 * self.momentum['vd' + key]) + (1 - self.beta1) * grads['d' + key]
             # RMSprop update.
             self.rmsprop['sd' + key] =  (self.beta2 * self.rmsprop['sd' + key]) + (1 - self.beta2) * (grads['d' + key]**2)
             # Update parameters.
-            self.params[key] = self.params[key] - (self.lr * self.momentum['vd' + key]) / (np.sqrt(self.rmsprop['sd' + key]) + self.epsilon)  
+            self.params[key] = self.params[key] - (self.lr * self.momentum['vd' + key]) / (np.sqrt(self.rmsprop['sd' + key]) + self.epsilon)
 
         return self.params
 
 class TanH():
- 
+
     def __init__(self, alpha = 1.7159):
         self.alpha = alpha
         self.cache = None
@@ -252,7 +262,7 @@ class TanH():
         return new_deltaL * (1 - np.tanh(X)**2)
 
 class Softmax():
-    
+
     def __init__(self):
         pass
 
@@ -274,11 +284,11 @@ class CrossEntropyLoss():
 
     def __init__(self):
         pass
-    
+
     def get(self, y_pred, y):
         """
             Return the negative log likelihood and the error at the last layer.
-            
+
             Parameters:
             - y_pred: model predictions.
             - y: ground truth labels.

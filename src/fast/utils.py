@@ -9,6 +9,7 @@ from src.fast.data import *
 from skimage import transform
 import matplotlib.pyplot as plt
 import concurrent.futures as cf
+import torch
 
 def download_mnist(filename):
     """
@@ -64,14 +65,14 @@ def extract_mnist(filename):
         with gzip.open(dirPath + elt[1]) as f:
             #According to the doc on MNIST website, offset for image starts at 16.
             mnist[elt[0]] = np.frombuffer(f.read(), dtype=np.uint8, offset=16).reshape(-1, 1, 28, 28)
-    
+
     for elt in filename[2:]:
         print('Extracting data/' + elt[0] + '...')
         with gzip.open(dirPath + elt[1]) as f:
             #According to the doc on MNIST website, offset for label starts at 8.
             mnist[elt[0]] = np.frombuffer(f.read(), dtype=np.uint8, offset=8)
 
-    print('Files extraction: OK') 
+    print('Files extraction: OK')
 
     return mnist
 
@@ -96,8 +97,8 @@ def load(filename):
     if dirPath == None:
         raise FileNotFoundError("extract_mnist(): Impossible to find data/ from current folder. You need to manually add the path to it in the \'terminal_path\' list and the run the function again.")
 
-    L = [elt[1] for elt in filename]   
-    count = 0 
+    L = [elt[1] for elt in filename]
+    count = 0
 
     #Check if the 4 .gz files exist.
     for elt in L:
@@ -113,22 +114,22 @@ def load(filename):
 
     print('Loading dataset: OK')
     return mnist["training_images"], mnist["training_labels"], mnist["test_images"], mnist["test_labels"]
-    
+
 def resize_dataset(dataset):
     """
         Resizes dataset of MNIST images to (32, 32).
 
         Parameters:
         -dataset: a numpy array of size [?, 1, 28, 28].
-    """        
+    """
     args = [dataset[i:i+1000] for i in range(0, len(dataset), 1000)]
-    
+
     def f(chunk):
         return transform.resize(chunk, (chunk.shape[0], 1, 32, 32))
 
     with cf.ThreadPoolExecutor() as executor:
         res = executor.map(f, args)
-    
+
     res = np.array([*res])
     res = res.reshape(-1, 1, 32, 32)
     return res
@@ -145,11 +146,11 @@ def dataloader(X, y, BATCH_SIZE):
     n = len(X)
     for t in range(0, n, BATCH_SIZE):
         yield X[t:t+BATCH_SIZE, ...], y[t:t+BATCH_SIZE, ...]
-        
+
 def one_hot_encoding(y):
     """
         Performs one-hot-encoding on y.
-        
+
         Parameters:
         - y: ground truth labels.
     """
@@ -222,7 +223,7 @@ def load_params_from_file(model, isNotebook=False):
         params = pickle.load(pickle_in)
         model.set_params(params)
     return model
-            
+
 def prettyPrint3D(M):
     """
         Displays a 3D matrix in a pretty way.
@@ -233,9 +234,9 @@ def prettyPrint3D(M):
     m, n_C, n_H, n_W = M.shape
 
     for i in range(m):
-        
+
         for c in range(n_C):
-            print('Image {}, channel {}'.format(i + 1, c + 1), end='\n\n')  
+            print('Image {}, channel {}'.format(i + 1, c + 1), end='\n\n')
 
             for h in range(n_H):
                 print("/", end="")
@@ -245,13 +246,13 @@ def prettyPrint3D(M):
                     print(M[i, c, h, j], end = ",")
 
                 print("/", end='\n\n')
-        
+
         print('-------------------', end='\n\n')
 
 def plot_example(X, y, y_pred=None):
     """
         Plots 9 examples and their associate labels.
-        
+
         Parameters:
         -X: Training examples.
         -y: true labels.
@@ -260,9 +261,9 @@ def plot_example(X, y, y_pred=None):
     # Create figure with 3 x 3 sub-plots.
     fig, axes = plt.subplots(3, 3)
     fig.subplots_adjust(hspace=0.3, wspace=0.3)
-     
-    X, y = X[:9, 0, ...], y[:9] 
-    
+
+    X, y = X[:9, 0, ...], y[:9]
+
     for i, ax in enumerate(axes.flat):
         # Plot image.
         ax.imshow(X[i])
@@ -275,26 +276,26 @@ def plot_example(X, y, y_pred=None):
 
         # Show the classes as the label on the x-axis.
         ax.set_xlabel(xlabel)
-        
+
         # Remove ticks from the plot.
         ax.set_xticks([])
         ax.set_yticks([])
-    
+
     # Ensure the plot is shown correctly with multiple plots in a single Notebook cell.
     plt.show()
 
 def plot_example_errors(X, y, y_pred):
     """
         Plots 9 example errors and their associate true/predicted labels.
-        
+
         Parameters:
         -X: Training examples.
         -y: true labels.
         -y_pred: predicted labels.
-    
+
     """
     incorrect = (y != y_pred)
- 
+
     X = X[incorrect]
     y = y[incorrect]
     y_pred = y_pred[incorrect]
@@ -316,7 +317,7 @@ def get_indices(X_shape, HF, WF, stride, pad):
         Returns:
         -i: matrix of index i.
         -j: matrix of index j.
-        -d: matrix of index d. 
+        -d: matrix of index d.
             (Use to mark delimitation for each channel
             during multi-dimensional arrays indexing).
     """
@@ -326,7 +327,7 @@ def get_indices(X_shape, HF, WF, stride, pad):
     # get output size
     out_h = int((n_H + 2 * pad - HF) / stride) + 1
     out_w = int((n_W + 2 * pad - WF) / stride) + 1
-  
+
     # ----Compute matrix of index i----
 
     # Level 1 vector.
@@ -339,7 +340,7 @@ def get_indices(X_shape, HF, WF, stride, pad):
     i = level1.reshape(-1, 1) + everyLevels.reshape(1, -1)
 
     # ----Compute matrix of index j----
-    
+
     # Slide 1 vector.
     slide1 = np.tile(np.arange(WF), HF)
     # Duplicate for the other channels.
@@ -399,8 +400,8 @@ def col2im(dX_col, X_shape, HF, WF, stride, pad):
     # Add padding if needed.
     H_padded, W_padded = H + 2 * pad, W + 2 * pad
     X_padded = np.zeros((N, D, H_padded, W_padded))
-    
-    # Index matrices, necessary to transform our input image into a matrix. 
+
+    # Index matrices, necessary to transform our input image into a matrix.
     i, j, d = get_indices(X_shape, HF, WF, stride, pad)
     # Retrieve batch dimension by spliting dX_col N times: (X, Y) => (N, X, Y)
     dX_col_reshaped = np.array(np.hsplit(dX_col, N))
@@ -412,3 +413,9 @@ def col2im(dX_col, X_shape, HF, WF, stride, pad):
         return X_padded
     elif type(pad) is int:
         return X_padded[pad:-pad, pad:-pad, :, :]
+
+def mask_filter(w, axis=0, kept_index=[]):
+    a = torch.tensor(w)
+    b = torch.index_select(a, axis, torch.tensor(kept_index))
+    b = b.numpy()
+    return b
